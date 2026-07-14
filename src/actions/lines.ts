@@ -36,18 +36,32 @@ export async function updateLineCapacity(
   id: number,
   formData: FormData
 ): Promise<ActionResult> {
-  const parsed = lineSchema.shape.weeklyCapacity.safeParse(
-    formData.get("weeklyCapacity")
-  );
+  const parsed = z
+    .object({
+      weeklyCapacity: lineSchema.shape.weeklyCapacity,
+      dailyCapacity: z.coerce
+        .number()
+        .int("정수를 입력하세요")
+        .positive("일일 CAPA는 1 이상이어야 합니다")
+        .optional(),
+    })
+    .safeParse({
+      weeklyCapacity: formData.get("weeklyCapacity"),
+      dailyCapacity: formData.get("dailyCapacity") || undefined,
+    });
   if (!parsed.success) {
     return { ok: false, message: parsed.error.issues[0].message };
   }
   await prisma.productionLine.update({
     where: { id },
-    data: { weeklyCapacity: parsed.data },
+    data: {
+      weeklyCapacity: parsed.data.weeklyCapacity,
+      dailyCapacity: parsed.data.dailyCapacity ?? null,
+    },
   });
   revalidatePath("/lines");
   revalidatePath("/mps");
+  revalidatePath("/daily");
   return { ok: true };
 }
 

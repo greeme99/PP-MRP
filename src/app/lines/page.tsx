@@ -76,9 +76,18 @@ export default async function LinesPage() {
                       type="number"
                       min={1}
                       defaultValue={line.weeklyCapacity}
-                      className={`${inputCls} w-28 text-right`}
+                      className={`${inputCls} w-24 text-right`}
                     />
                     <span className="text-xs text-gray-500">개/주</span>
+                    <input
+                      name="dailyCapacity"
+                      type="number"
+                      min={1}
+                      defaultValue={line.dailyCapacity ?? ""}
+                      placeholder="일일"
+                      className={`${inputCls} w-20 text-right`}
+                    />
+                    <span className="text-xs text-gray-500">개/일</span>
                     <button type="submit" className={btnGhostCls}>저장</button>
                   </ActionForm>
                 </td>

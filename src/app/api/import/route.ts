@@ -19,6 +19,35 @@ import {
 
 export const runtime = "nodejs";
 
+/**
+ * xlsx가 아닌 파일을 시그니처로 감지해 원인별 안내 메시지를 반환한다.
+ * xlsx는 ZIP 컨테이너라 항상 "PK"로 시작한다.
+ */
+function detectNonXlsx(bytes: Uint8Array): string | null {
+  if (bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4b) {
+    return null; // ZIP(PK) → xlsx일 가능성, exceljs에 넘긴다
+  }
+  // 구형 Excel(.xls)의 OLE2 시그니처: D0 CF 11 E0
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0xd0 &&
+    bytes[1] === 0xcf &&
+    bytes[2] === 0x11 &&
+    bytes[3] === 0xe0
+  ) {
+    return '구형 Excel(.xls) 형식입니다. Excel에서 파일을 연 뒤 "다른 이름으로 저장 → Excel 통합 문서(.xlsx)"로 저장해 다시 업로드하세요.';
+  }
+  const head = new TextDecoder("utf-8", { fatal: false })
+    .decode(bytes.slice(0, 256))
+    .trimStart()
+    .toLowerCase();
+  // 일부 ERP/그룹웨어는 HTML 표를 .xls/.xlsx 확장자로 내보낸다
+  if (head.startsWith("<") || head.includes("<html") || head.includes("<table")) {
+    return "엑셀 파일이 아니라 HTML로 내보낸 표입니다(일부 시스템의 엑셀 내보내기가 이 형식입니다). Excel에서 파일을 연 뒤 .xlsx로 다시 저장해 업로드하세요.";
+  }
+  return '엑셀 통합 문서(.xlsx)가 아닙니다. Excel에서 "다른 이름으로 저장 → Excel 통합 문서(.xlsx)"로 저장한 파일을 업로드하세요.';
+}
+
 /** ExcelJS 셀 값(formula/richText 등)을 단순 값으로 정규화한다. */
 function normalizeCell(v: ExcelJS.CellValue): CellValue {
   if (v === null || v === undefined) return null;
@@ -57,12 +86,22 @@ export async function POST(req: Request) {
     );
   }
 
+  const buffer = await file.arrayBuffer();
+  const formatError = detectNonXlsx(new Uint8Array(buffer));
+  if (formatError) {
+    return NextResponse.json({ ok: false, message: formatError }, { status: 400 });
+  }
+
   const workbook = new ExcelJS.Workbook();
   try {
-    await workbook.xlsx.load(await file.arrayBuffer());
-  } catch {
+    await workbook.xlsx.load(buffer);
+  } catch (e) {
+    console.error("[import] xlsx 읽기 실패:", file.name, e);
     return NextResponse.json(
-      { ok: false, message: "xlsx 파일을 읽을 수 없습니다. 형식을 확인하세요." },
+      {
+        ok: false,
+        message: `xlsx 파일을 읽을 수 없습니다 (${e instanceof Error ? e.message : String(e)}). Excel에서 "다른 이름으로 저장 → Excel 통합 문서(.xlsx)"로 다시 저장해 업로드해 보세요.`,
+      },
       { status: 400 }
     );
   }

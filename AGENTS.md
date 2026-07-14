@@ -30,7 +30,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - 순수 로직(week/planning/bom/excel 파싱)에는 반드시 Vitest 테스트를 함께 둔다. DB 통합 테스트는 두지 않고 action을 얇게 유지한다.
 - 인증 없음(MVP). 추가 시 `src/middleware.ts` 단일 지점에서 전 경로 보호.
 
+- `src/lib/mrp.ts` — MRP 총소요량 전개(순수 함수). 정책: 재고 차감 없음, 리드타임 오프셋 없음(소요 주차 = 생산 주차). 화면 `/mrp`, export `/api/export/mrp`.
+- `src/lib/daily.ts` — 일별계획(순수 함수). 주간 PlanEntry를 가동일(월~금) 균등 분할(나머지 앞쪽 +1), 일별 계획이 있는 엔트리는 불변(멱등). `DailyPlanEntry`는 PlanEntry에 종속(cascade), 주말은 초안 제외·수동 입력 가능. 일별 부하는 `ProductionLine.dailyCapacity` 기준. 화면 `/daily`.
+
 ## 2차 확장 예정 (스키마는 이미 호환)
-- MRP: `BomLine` + `PlanEntry` 읽기로 자재소요 전개
-- 재고: `InventoryTx` 모델 신설 / 실적: `ProductionResult` 모델 신설
+- 재고: `InventoryTx` 모델 신설 → MRP 순소요(net requirement) 확장
+- 실적: `ProductionResult` 모델 신설
 - `PlanEntry.orderLineId`가 nullable인 것은 재고보충/예측생산(MTS) 대비

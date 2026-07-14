@@ -9,6 +9,8 @@ export const metadata: Metadata = {
 
 const NAV = [
   { href: "/mps", label: "생산계획(MPS)" },
+  { href: "/daily", label: "일별계획" },
+  { href: "/mrp", label: "자재소요(MRP)" },
   { href: "/orders", label: "수주" },
   { href: "/items", label: "품목·BOM" },
   { href: "/partners", label: "거래처" },

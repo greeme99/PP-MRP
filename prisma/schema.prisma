@@ -81,6 +81,7 @@ model ProductionLine {
   code           String      @unique
   name           String
   weeklyCapacity Int // 주간 CAPA (pcs/주)
+  dailyCapacity  Int? // 일일 CAPA (pcs/일) — 일별계획 부하 판정용
   isActive       Boolean     @default(true)
   planEntries    PlanEntry[]
   defaultItems   Item[]
@@ -115,20 +116,36 @@ model SalesOrderLine {
 }
 
 model PlanEntry {
-  id          Int             @id @default(autoincrement())
-  orderLineId Int? // nullable: 향후 재고보충/예측생산 대비
-  itemId      Int
-  lineId      Int
-  weekStart   DateTime // 주 시작일(월요일), UTC 자정 정규화
-  qty         Int
-  source      PlanSource      @default(AUTO)
-  orderLine   SalesOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
-  item        Item            @relation(fields: [itemId], references: [id])
-  line        ProductionLine  @relation(fields: [lineId], references: [id])
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  id           Int              @id @default(autoincrement())
+  orderLineId  Int? // nullable: 향후 재고보충/예측생산 대비
+  itemId       Int
+  lineId       Int
+  weekStart    DateTime // 주 시작일(월요일), UTC 자정 정규화
+  qty          Int
+  source       PlanSource       @default(AUTO)
+  orderLine    SalesOrderLine?  @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  item         Item             @relation(fields: [itemId], references: [id])
+  line         ProductionLine   @relation(fields: [lineId], references: [id])
+  dailyEntries DailyPlanEntry[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
 
   @@unique([orderLineId, lineId, weekStart])
   @@index([lineId, weekStart])
   @@index([weekStart])
+}
+
+// 일별/라인별 생산계획 — 주간 PlanEntry를 일 단위로 분해한 하위 계획
+model DailyPlanEntry {
+  id          Int        @id @default(autoincrement())
+  planEntryId Int
+  date        DateTime // 해당 일자, UTC 자정 정규화
+  qty         Int
+  source      PlanSource @default(AUTO)
+  planEntry   PlanEntry  @relation(fields: [planEntryId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([planEntryId, date])
+  @@index([date])
 }
