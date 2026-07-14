@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "prod-plan-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "prisma-studio",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["prisma", "studio", "--browser", "none"],
+      "port": 5555
+    }
+  ]
+}

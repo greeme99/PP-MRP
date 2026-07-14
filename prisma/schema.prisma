@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// 품목 유형: 완제품 / 반제품 / 원자재
+enum ItemType {
+  FG
+  SF
+  RM
+}
+
+enum PartnerType {
+  CUSTOMER
+  VENDOR
+  BOTH
+}
+
+enum OrderStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+enum OrderLineStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+enum PlanSource {
+  AUTO
+  MANUAL
+}
+
+model Item {
+  id            Int              @id @default(autoincrement())
+  code          String           @unique // 품목코드 (Excel import upsert 기준)
+  name          String
+  type          ItemType
+  uom           String           @default("EA")
+  spec          String?
+  defaultLineId Int?
+  defaultLine   ProductionLine?  @relation(fields: [defaultLineId], references: [id])
+  isActive      Boolean          @default(true)
+  parentBoms    BomLine[]        @relation("BomParent")
+  childBoms     BomLine[]        @relation("BomChild")
+  orderLines    SalesOrderLine[]
+  planEntries   PlanEntry[]
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+}
+
+model BomLine {
+  id           Int   @id @default(autoincrement())
+  parentItemId Int
+  childItemId  Int
+  qtyPer       Float // 모품목 1개당 소요량
+  parentItem   Item  @relation("BomParent", fields: [parentItemId], references: [id], onDelete: Cascade)
+  childItem    Item  @relation("BomChild", fields: [childItemId], references: [id], onDelete: Cascade)
+
+  @@unique([parentItemId, childItemId])
+}
+
+model Partner {
+  id       Int          @id @default(autoincrement())
+  code     String       @unique
+  name     String
+  type     PartnerType
+  contact  String?
+  isActive Boolean      @default(true)
+  orders   SalesOrder[]
+}
+
+model ProductionLine {
+  id             Int         @id @default(autoincrement())
+  code           String      @unique
+  name           String
+  weeklyCapacity Int // 주간 CAPA (pcs/주)
+  isActive       Boolean     @default(true)
+  planEntries    PlanEntry[]
+  defaultItems   Item[]
+}
+
+model SalesOrder {
+  id         Int              @id @default(autoincrement())
+  orderNo    String           @unique // 수주번호 (Excel import upsert 기준)
+  customerId Int
+  customer   Partner          @relation(fields: [customerId], references: [id])
+  orderDate  DateTime
+  status     OrderStatus      @default(OPEN)
+  memo       String?
+  lines      SalesOrderLine[]
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+}
+
+model SalesOrderLine {
+  id          Int             @id @default(autoincrement())
+  orderId     Int
+  lineNo      Int
+  itemId      Int
+  qty         Int
+  dueDate     DateTime
+  status      OrderLineStatus @default(OPEN)
+  order       SalesOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item        Item            @relation(fields: [itemId], references: [id])
+  planEntries PlanEntry[]
+
+  @@unique([orderId, lineNo])
+}
+
+model PlanEntry {
+  id          Int             @id @default(autoincrement())
+  orderLineId Int? // nullable: 향후 재고보충/예측생산 대비
+  itemId      Int
+  lineId      Int
+  weekStart   DateTime // 주 시작일(월요일), UTC 자정 정규화
+  qty         Int
+  source      PlanSource      @default(AUTO)
+  orderLine   SalesOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  item        Item            @relation(fields: [itemId], references: [id])
+  line        ProductionLine  @relation(fields: [lineId], references: [id])
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([orderLineId, lineId, weekStart])
+  @@index([lineId, weekStart])
+  @@index([weekStart])
+}

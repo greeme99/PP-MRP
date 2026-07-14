@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File \".claude\\hooks\\post-edit-check.ps1\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}
