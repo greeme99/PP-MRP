@@ -54,3 +54,10 @@ export const PARTNER_TYPE_LABEL: Record<string, string> = {
   VENDOR: "공급사",
   BOTH: "고객+공급",
 };
+
+export const ORDER_PATTERN_LABEL: Record<string, string> = {
+  PO: "PO(구매오더)",
+  DO: "DO(납품오더)",
+  JIT: "JIT",
+  KANBAN: "간판",
+};

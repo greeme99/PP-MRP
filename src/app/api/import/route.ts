@@ -3,6 +3,7 @@ import ExcelJS from "exceljs";
 import {
   SHEET_HEADERS,
   parseBomSheet,
+  parseInventorySheet,
   parseItemsSheet,
   parseOrdersSheet,
   parsePartnersSheet,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/excel/import";
 import {
   applyBom,
+  applyInventory,
   applyItems,
   applyOrders,
   applyPartners,
@@ -119,9 +121,9 @@ export async function POST(req: Request) {
     );
   }
 
-  // 참조 순서 보장: 거래처 → 품목 → BOM → 수주
+  // 참조 순서 보장: 거래처 → 품목 → BOM → 수주 → 재고
   const results: SheetApplyResult[] = [];
-  for (const name of ["거래처", "품목", "BOM", "수주"] as const) {
+  for (const name of ["거래처", "품목", "BOM", "수주", "재고"] as const) {
     const ws = workbook.getWorksheet(name);
     if (!ws) continue;
     const rows = sheetToRows(ws);
@@ -132,7 +134,9 @@ export async function POST(req: Request) {
           ? parseItemsSheet(rows)
           : name === "BOM"
             ? parseBomSheet(rows)
-            : parseOrdersSheet(rows);
+            : name === "수주"
+              ? parseOrdersSheet(rows)
+              : parseInventorySheet(rows);
 
     if (parsed.errors.length > 0) {
       results.push({ sheet: name, imported: 0, errors: parsed.errors });
@@ -146,7 +150,9 @@ export async function POST(req: Request) {
             ? await applyItems(parsed.rows as never)
             : name === "BOM"
               ? await applyBom(parsed.rows as never)
-              : await applyOrders(parsed.rows as never);
+              : name === "수주"
+                ? await applyOrders(parsed.rows as never)
+                : await applyInventory(parsed.rows as never);
       results.push(applied);
     } catch (e) {
       results.push({

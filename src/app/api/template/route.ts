@@ -13,6 +13,7 @@ const EXAMPLE_ROWS: Record<string, (string | number)[][]> = {
   수주: [
     ["SO-EXAMPLE-1", "C-EXAMPLE", "2026-07-01", 1, "FG-EXAMPLE-01", 500, "2026-08-31"],
   ],
+  재고: [["RM-EXAMPLE-01", 1000, "2026-07-14"]],
 };
 
 export async function GET() {

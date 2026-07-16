@@ -15,6 +15,7 @@ export const SHEET_HEADERS = {
   거래처: ["거래처코드", "거래처명", "구분", "담당자"],
   BOM: ["모품목코드", "자품목코드", "소요량"],
   수주: ["수주번호", "고객사코드", "수주일", "행번호", "품목코드", "수량", "납기일"],
+  재고: ["품목코드", "실사수량", "기준일"],
 } as const;
 
 export type SheetName = keyof typeof SHEET_HEADERS;
@@ -277,6 +278,46 @@ export function parseOrdersSheet(rows: CellValue[][]): ParseResult<OrderRow> {
       continue;
     seen.add(key);
     out.push({ row: rowNo, orderNo, customerCode, orderDate, lineNo, itemCode, qty, dueDate });
+  }
+  return { rows: out, errors };
+}
+
+export type InventoryRow = {
+  row: number;
+  itemCode: string;
+  actualQty: number; // 실사 절대수량
+  date: Date | null; // 기준일 (없으면 반영 시점의 오늘)
+};
+
+export function parseInventorySheet(
+  rows: CellValue[][]
+): ParseResult<InventoryRow> {
+  const errors = validateHeader("재고", rows[0] ?? []);
+  if (errors.length > 0) return { rows: [], errors };
+  const out: InventoryRow[] = [];
+  const seen = new Set<string>();
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (isEmptyRow(r)) continue;
+    const rowNo = i + 1;
+    const itemCode = cellString(r[0]);
+    const actualQty = cellNumber(r[1]);
+    const dateRaw = cellString(r[2]);
+    const date = dateRaw === "" ? null : cellDate(r[2]);
+    const dup = !!itemCode && seen.has(itemCode);
+
+    if (!itemCode) errors.push({ sheet: "재고", row: rowNo, column: "품목코드", message: "필수입니다" });
+    else if (dup)
+      errors.push({ sheet: "재고", row: rowNo, column: "품목코드", message: `중복된 품목코드입니다: ${itemCode}` });
+    if (actualQty === null || !Number.isInteger(actualQty) || actualQty < 0)
+      errors.push({ sheet: "재고", row: rowNo, column: "실사수량", message: "0 이상의 정수여야 합니다" });
+    if (dateRaw !== "" && date === null)
+      errors.push({ sheet: "재고", row: rowNo, column: "기준일", message: "날짜(YYYY-MM-DD 또는 엑셀 날짜)여야 합니다" });
+
+    if (!itemCode || dup || actualQty === null || !Number.isInteger(actualQty) || actualQty < 0 || (dateRaw !== "" && date === null))
+      continue;
+    seen.add(itemCode);
+    out.push({ row: rowNo, itemCode, actualQty, date });
   }
   return { rows: out, errors };
 }

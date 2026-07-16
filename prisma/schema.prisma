@@ -37,6 +37,20 @@ enum PlanSource {
   MANUAL
 }
 
+// 발주패턴: 구매오더 / 납품오더 / JIT / 간판
+enum OrderPattern {
+  PO
+  DO
+  JIT
+  KANBAN
+}
+
+enum InventoryTxType {
+  IN // 입고
+  OUT // 출고
+  ADJUST // 실사 조정
+}
+
 model Item {
   id            Int              @id @default(autoincrement())
   code          String           @unique // 품목코드 (Excel import upsert 기준)
@@ -46,11 +60,20 @@ model Item {
   spec          String?
   defaultLineId Int?
   defaultLine   ProductionLine?  @relation(fields: [defaultLineId], references: [id])
+  // ---- 발주 속성 (Item Master) ----
+  moq             Int? // 최소발주수량
+  leadTimeDays    Int? // 구매 리드타임(일)
+  roundingValue   Int? // 발주 배수 (Rounding Value)
+  orderPattern    OrderPattern? // 발주패턴
+  defaultVendorId Int?
+  defaultVendor   Partner?      @relation("ItemVendor", fields: [defaultVendorId], references: [id])
   isActive      Boolean          @default(true)
   parentBoms    BomLine[]        @relation("BomParent")
   childBoms     BomLine[]        @relation("BomChild")
   orderLines    SalesOrderLine[]
   planEntries   PlanEntry[]
+  results       ProductionResult[]
+  inventoryTxs  InventoryTx[]
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 }
@@ -74,6 +97,7 @@ model Partner {
   contact  String?
   isActive Boolean      @default(true)
   orders   SalesOrder[]
+  suppliedItems Item[] @relation("ItemVendor")
 }
 
 model ProductionLine {
@@ -83,8 +107,35 @@ model ProductionLine {
   weeklyCapacity Int // 주간 CAPA (pcs/주)
   dailyCapacity  Int? // 일일 CAPA (pcs/일) — 일별계획 부하 판정용
   isActive       Boolean     @default(true)
+  siteId         Int?
+  site           Site?       @relation(fields: [siteId], references: [id])
+  facilities     Facility[]
   planEntries    PlanEntry[]
   defaultItems   Item[]
+  results        ProductionResult[]
+}
+
+// 사업장 (Site Master). Site > Line > Facility 계층.
+model Site {
+  id         Int              @id @default(autoincrement())
+  code       String           @unique
+  name       String
+  address    String?
+  isActive   Boolean          @default(true)
+  lines      ProductionLine[]
+  facilities Facility[]
+}
+
+// 설비 (Facility Master). 라인/사업장에 선택적으로 소속.
+model Facility {
+  id       Int             @id @default(autoincrement())
+  code     String          @unique
+  name     String
+  siteId   Int?
+  site     Site?           @relation(fields: [siteId], references: [id])
+  lineId   Int?
+  line     ProductionLine? @relation(fields: [lineId], references: [id])
+  isActive Boolean         @default(true)
 }
 
 model SalesOrder {
@@ -111,6 +162,7 @@ model SalesOrderLine {
   order       SalesOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
   item        Item            @relation(fields: [itemId], references: [id])
   planEntries PlanEntry[]
+  results     ProductionResult[]
 
   @@unique([orderId, lineNo])
 }
@@ -133,6 +185,42 @@ model PlanEntry {
   @@unique([orderLineId, lineId, weekStart])
   @@index([lineId, weekStart])
   @@index([weekStart])
+}
+
+// 재고 트랜잭션 — qty는 부호 있는 증감량 (IN +, OUT -, ADJUST ±).
+// 현재고 = qty 합산. 실사 이관은 절대수량을 델타로 변환해 ADJUST로 기록한다.
+model InventoryTx {
+  id        Int             @id @default(autoincrement())
+  itemId    Int
+  date      DateTime // 발생 일자, UTC 자정 정규화
+  type      InventoryTxType
+  qty       Int
+  memo      String?
+  item      Item            @relation(fields: [itemId], references: [id])
+  createdAt DateTime        @default(now())
+
+  @@index([itemId, date])
+}
+
+// 생산실적 — 계획과 독립적으로 보존되는 사실 기록.
+// 수주라인 삭제 시에도 기록은 남긴다(SetNull). 계획(PlanEntry) 삭제와 무관.
+model ProductionResult {
+  id          Int             @id @default(autoincrement())
+  date        DateTime // 실적 일자, UTC 자정 정규화
+  lineId      Int
+  itemId      Int
+  orderLineId Int?
+  qty         Int             @default(0) // 양품 수량
+  defectQty   Int             @default(0) // 불량 수량
+  line        ProductionLine  @relation(fields: [lineId], references: [id])
+  item        Item            @relation(fields: [itemId], references: [id])
+  orderLine   SalesOrderLine? @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([date, lineId, itemId, orderLineId])
+  @@index([lineId, date])
+  @@index([date])
 }
 
 // 일별/라인별 생산계획 — 주간 PlanEntry를 일 단위로 분해한 하위 계획

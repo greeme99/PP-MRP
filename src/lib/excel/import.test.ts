@@ -139,3 +139,37 @@ describe("parseOrdersSheet", () => {
     expect(cols).toContain("납기일");
   });
 });
+
+describe("parseInventorySheet", () => {
+  it("정상 파싱 + 기준일 생략 허용", async () => {
+    const { parseInventorySheet } = await import("./import");
+    const { rows, errors } = parseInventorySheet([
+      [...H.재고],
+      ["RM-1", 1000, "2026-07-14"],
+      ["RM-2", 0, ""],
+    ]);
+    expect(errors).toEqual([]);
+    expect(rows[0]).toMatchObject({ row: 2, itemCode: "RM-1", actualQty: 1000 });
+    expect(rows[0].date?.toISOString().slice(0, 10)).toBe("2026-07-14");
+    expect(rows[1]).toMatchObject({ itemCode: "RM-2", actualQty: 0, date: null });
+  });
+
+  it("음수/소수/중복/잘못된 날짜 에러", async () => {
+    const { parseInventorySheet } = await import("./import");
+    const { rows, errors } = parseInventorySheet([
+      [...H.재고],
+      ["RM-1", -5, ""],
+      ["RM-2", 1.5, ""],
+      ["RM-3", 10, "어제"],
+      ["RM-4", 10, ""],
+      ["RM-4", 20, ""],
+    ]);
+    expect(rows.map((r) => r.itemCode)).toEqual(["RM-4"]);
+    expect(errors.map((e) => [e.row, e.column])).toEqual([
+      [2, "실사수량"],
+      [3, "실사수량"],
+      [4, "기준일"],
+      [6, "품목코드"],
+    ]);
+  });
+});

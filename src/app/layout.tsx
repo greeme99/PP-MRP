@@ -8,13 +8,13 @@ export const metadata: Metadata = {
 };
 
 const NAV = [
+  { href: "/", label: "대시보드" },
   { href: "/mps", label: "생산계획(MPS)" },
   { href: "/daily", label: "일별계획" },
   { href: "/mrp", label: "자재소요(MRP)" },
+  { href: "/inventory", label: "재고" },
   { href: "/orders", label: "수주" },
-  { href: "/items", label: "품목·BOM" },
-  { href: "/partners", label: "거래처" },
-  { href: "/lines", label: "라인" },
+  { href: "/mdm/items", label: "기준정보(MDM)" },
   { href: "/import", label: "엑셀 가져오기" },
 ];
 
@@ -28,7 +28,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-gray-50 text-gray-900">
         <header className="bg-slate-800 text-white">
           <div className="mx-auto max-w-7xl px-4 flex items-center gap-6 h-12">
-            <Link href="/mps" className="font-bold tracking-tight">
+            <Link href="/" className="font-bold tracking-tight">
               Prod.Plan
             </Link>
             <nav className="flex gap-4 text-sm">

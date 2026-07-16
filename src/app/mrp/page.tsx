@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
+import { netRequirements } from "@/lib/inventory";
 import { explodeRequirements, roundQty } from "@/lib/mrp";
 import {
   Badge,
@@ -27,7 +28,12 @@ const DEFAULT_WEEKS = 12;
 export default async function MrpPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; weeks?: string; type?: string }>;
+  searchParams: Promise<{
+    from?: string;
+    weeks?: string;
+    type?: string;
+    view?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const from = sp.from
@@ -38,12 +44,13 @@ export default async function MrpPage({
     26
   );
   const typeFilter = sp.type === "ALL" ? "ALL" : "RM"; // 기본: 원자재만
+  const view = sp.view === "gross" ? "gross" : "net"; // 기본: 순소요
   const weeks = weekRange(from, weeksCount);
   const weekKeys = weeks.map(toDateKey);
   const fromKey = toDateKey(from);
   const toKeyExclusive = toDateKey(addWeeks(from, weeksCount));
 
-  const [entries, edges] = await Promise.all([
+  const [entries, edges, txSums] = await Promise.all([
     prisma.planEntry.findMany({
       where: {
         weekStart: {
@@ -56,50 +63,81 @@ export default async function MrpPage({
     prisma.bomLine.findMany({
       select: { parentItemId: true, childItemId: true, qtyPer: true },
     }),
+    prisma.inventoryTx.groupBy({ by: ["itemId"], _sum: { qty: true } }),
   ]);
 
-  const req = explodeRequirements(entries, edges);
+  const gross = explodeRequirements(entries, edges);
+  const onHand = new Map(txSums.map((t) => [t.itemId, t._sum.qty ?? 0]));
+  const { net } = netRequirements(gross, onHand);
+  const req = view === "net" ? net : gross;
 
   const items = await prisma.item.findMany({
-    where: { id: { in: [...req.keys()] } },
+    where: { id: { in: [...gross.keys()] } },
   });
   const rows = items
     .filter((i) => typeFilter === "ALL" || i.type === "RM")
+    .filter((i) => view === "gross" || net.has(i.id))
     .sort((a, b) => a.type.localeCompare(b.type) || a.code.localeCompare(b.code))
     .map((item) => {
-      const weekMap = req.get(item.id)!;
+      const weekMap = req.get(item.id) ?? new Map<string, number>();
       const total = roundQty(
         [...weekMap.values()].reduce((s, q) => s + q, 0)
       );
       return { item, weekMap, total };
     });
+  const coveredCount =
+    view === "net"
+      ? items.filter(
+          (i) => (typeFilter === "ALL" || i.type === "RM") && !net.has(i.id)
+        ).length
+      : 0;
 
   const prevKey = toDateKey(addWeeks(from, -4));
   const nextKey = toDateKey(addWeeks(from, 4));
   const todayKey = toDateKey(currentWeekStart());
-  const qs = (f: string) => `/mrp?from=${f}&weeks=${weeksCount}&type=${typeFilter}`;
+  const qs = (f: string) =>
+    `/mrp?from=${f}&weeks=${weeksCount}&type=${typeFilter}&view=${view}`;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <PageTitle>자재소요 (MRP) — 총소요량</PageTitle>
+        <PageTitle>
+          자재소요 (MRP) — {view === "net" ? "순소요량" : "총소요량"}
+        </PageTitle>
         <div className="flex gap-2 items-center">
           <Link href={qs(prevKey)} className={btnGhostCls}>← 4주 이전</Link>
           <Link href={qs(todayKey)} className={btnGhostCls}>이번 주</Link>
           <Link href={qs(nextKey)} className={btnGhostCls}>4주 이후 →</Link>
           <Link
-            href={`/mrp?from=${fromKey}&weeks=${weeksCount}&type=${typeFilter === "ALL" ? "RM" : "ALL"}`}
+            href={`/mrp?from=${fromKey}&weeks=${weeksCount}&type=${typeFilter === "ALL" ? "RM" : "ALL"}&view=${view}`}
             className={btnGhostCls}
           >
             {typeFilter === "ALL" ? "원자재만 보기" : "반제품 포함 보기"}
+          </Link>
+          <Link
+            href={`/mrp?from=${fromKey}&weeks=${weeksCount}&type=${typeFilter}&view=${view === "net" ? "gross" : "net"}`}
+            className={btnGhostCls}
+          >
+            {view === "net" ? "총소요 보기" : "순소요 보기"}
           </Link>
         </div>
       </div>
 
       <p className="text-xs text-gray-500 mb-3">
-        생산계획(MPS) × BOM 전개로 계산한 <b>총소요량</b>입니다. 재고 차감과
-        리드타임 오프셋은 하지 않으며(소요 주차 = 생산 주차), 발주 시점은
-        구매 리드타임을 감안해 판단하세요.
+        {view === "net" ? (
+          <>
+            <b>순소요량</b> = 총소요 - 현재고 (재고를 첫 주부터 순차 소진,
+            잔여분 이월). 리드타임 오프셋은 없으므로(소요 주차 = 생산 주차)
+            발주 시점은 구매 리드타임을 감안해 판단하세요.
+            {coveredCount > 0 &&
+              ` 재고로 전량 충당되는 ${coveredCount}개 품목은 목록에서 제외했습니다.`}
+          </>
+        ) : (
+          <>
+            <b>총소요량</b> (재고 차감 없음). 재고를 반영한 발주 판단은
+            &quot;순소요 보기&quot;를 사용하세요.
+          </>
+        )}
       </p>
 
       <Card>
@@ -112,6 +150,7 @@ export default async function MrpPage({
                 </th>
                 <th className="text-left text-xs font-semibold text-gray-500 px-2 py-1 border-b">유형</th>
                 <th className="text-left text-xs font-semibold text-gray-500 px-2 py-1 border-b">단위</th>
+                <th className="text-right text-xs font-semibold text-gray-500 px-2 py-1 border-b">현재고</th>
                 {weeks.map((w) => (
                   <th
                     key={toDateKey(w)}
@@ -139,6 +178,9 @@ export default async function MrpPage({
                     </Badge>
                   </td>
                   <td className="px-2 py-1 border-b text-xs text-gray-500">{item.uom}</td>
+                  <td className="px-2 py-1 border-b text-xs text-right text-gray-700">
+                    {(onHand.get(item.id) ?? 0).toLocaleString()}
+                  </td>
                   {weekKeys.map((wk) => {
                     const q = weekMap.get(wk);
                     return (
@@ -159,7 +201,7 @@ export default async function MrpPage({
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={weeksCount + 4} className="text-center text-gray-400 py-8 text-sm">
+                  <td colSpan={weeksCount + 5} className="text-center text-gray-400 py-8 text-sm">
                     이 기간에 자재소요가 없습니다 — MPS에 계획이 있는지 확인하세요
                   </td>
                 </tr>
@@ -171,7 +213,7 @@ export default async function MrpPage({
 
       <div className="text-right">
         <a
-          href={`/api/export/mrp?from=${fromKey}&weeks=${weeksCount}&type=${typeFilter}`}
+          href={`/api/export/mrp?from=${fromKey}&weeks=${weeksCount}&type=${typeFilter}&view=${view}`}
           className={btnCls}
         >
           엑셀로 내보내기

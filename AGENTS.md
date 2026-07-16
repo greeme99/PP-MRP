@@ -30,10 +30,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - 순수 로직(week/planning/bom/excel 파싱)에는 반드시 Vitest 테스트를 함께 둔다. DB 통합 테스트는 두지 않고 action을 얇게 유지한다.
 - 인증 없음(MVP). 추가 시 `src/middleware.ts` 단일 지점에서 전 경로 보호.
 
-- `src/lib/mrp.ts` — MRP 총소요량 전개(순수 함수). 정책: 재고 차감 없음, 리드타임 오프셋 없음(소요 주차 = 생산 주차). 화면 `/mrp`, export `/api/export/mrp`.
-- `src/lib/daily.ts` — 일별계획(순수 함수). 주간 PlanEntry를 가동일(월~금) 균등 분할(나머지 앞쪽 +1), 일별 계획이 있는 엔트리는 불변(멱등). `DailyPlanEntry`는 PlanEntry에 종속(cascade), 주말은 초안 제외·수동 입력 가능. 일별 부하는 `ProductionLine.dailyCapacity` 기준. 화면 `/daily`.
+- `src/lib/mrp.ts` — MRP 총소요량 전개(순수 함수). 리드타임 오프셋 없음(소요 주차 = 생산 주차). 화면 `/mrp`, export `/api/export/mrp`.
+- `src/lib/inventory.ts` — 재고/순소요(순수 함수). `InventoryTx.qty`는 부호 있는 증감량(현재고 = 합산), 실사는 절대수량→델타 ADJUST로 기록. `/mrp` 기본 뷰는 **순소요**(재고를 첫 주부터 순차 소진·이월, `netRequirements`), `view=gross`로 총소요 전환. 재고 입력: `/inventory` 화면 + 엑셀 "재고" 시트(실사 이관). 실적↔재고 자동 연동(백플러시)은 의도적으로 없음 — BOM 정확도 검증 후 도입 검토.
+- `src/lib/daily.ts` — 일별계획(순수 함수). 분할 정책: **납기 우선 + 일일 CAPA 순차 채움** — 같은 라인×주의 행을 납기순으로 월요일부터 `ProductionLine.dailyCapacity` 잔여량(기존 분할·수동 입력 부하 차감)만큼 채우고, 주 전체 CAPA 초과분은 금요일에 몰아 배치(빨간 부하 표시로 사람이 조정). CAPA 미설정 라인은 균등 분할 fallback. 일별 계획이 있는 엔트리는 불변(멱등). `DailyPlanEntry`는 PlanEntry에 종속(cascade), 주말은 초안 제외·수동 입력 가능. 화면 `/daily`.
+
+- `src/lib/results.ts` — 생산실적. `ProductionResult`는 계획과 독립 보존(수주라인 삭제 시 SetNull, 계획 삭제와 무관). 입력은 `/daily`의 실적·불량 서브행, 주별 롤업은 `/mps` 실적 행. 미달 잔량은 "잔량 이월" 버튼으로만 다음 주 이동(자동 이월 없음). export `/api/export/results`, 작업지시서 `/api/export/daily`.
+- `/` 대시보드 — 이번 주 계획대비실적, 미계획 수주, CAPA 초과(12주), 납기 임박(7일).
+- `/mdm/*` — 기준정보(MDM): Item(발주속성: MOQ/리드타임/Rounding/발주패턴 PO·DO·JIT·KANBAN/기본 공급사) / Vendor / Customer(Partner를 type으로 분리 표시, BOTH는 양쪽 노출) / Site / Facility / Line Master. 계층: Site > Line > Facility. 구 경로 `/items` `/partners` `/lines`는 리다이렉트. 마스터 삭제는 참조 존재 시 거부(사용중지 안내). Item 발주속성은 아직 화면 관리 전용 — MRP 발주 계산·엑셀 시트 반영은 후속.
+- UI 관례: 서브행 렌더링 시 `<Fragment key=...>` 사용(React key 경고 방지), `window.alert` 금지(MEMORY.md 참고).
 
 ## 2차 확장 예정 (스키마는 이미 호환)
-- 재고: `InventoryTx` 모델 신설 → MRP 순소요(net requirement) 확장
-- 실적: `ProductionResult` 모델 신설
+- 재고: `InventoryTx` 모델 신설 → MRP 순소요(net requirement) 확장, 실적 기반 생산입고 연계
 - `PlanEntry.orderLineId`가 nullable인 것은 재고보충/예측생산(MTS) 대비
+- 인증/입력자 기록: 실적 입력 정착 시 `src/middleware.ts` + 입력자 필드 도입 검토

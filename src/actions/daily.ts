@@ -7,23 +7,47 @@ import { generateDailyDraft } from "@/lib/daily";
 import { fromDateKey, weekStartOf } from "@/lib/week";
 import type { ActionResult } from "./items";
 
-/** 해당 주의 주간 계획 중 일별 계획이 없는 것을 월~금 균등 분할한다 (멱등). */
+/**
+ * 해당 주의 주간 계획 중 일별 계획이 없는 것을 분할한다 (멱등).
+ * 일일 CAPA가 있는 라인은 납기 우선 순차 채움, 없으면 균등 분할.
+ */
 export async function generateDailyDraftForWeek(
   weekStartKey: string
 ): Promise<ActionResult> {
   const weekStart = weekStartOf(fromDateKey(weekStartKey));
-  const weekly = await prisma.planEntry.findMany({
-    where: { weekStart },
-    include: { dailyEntries: { select: { id: true } } },
-  });
+  const [weekly, lines] = await Promise.all([
+    prisma.planEntry.findMany({
+      where: { weekStart },
+      include: {
+        orderLine: { select: { dueDate: true } },
+        dailyEntries: { select: { date: true, qty: true } },
+      },
+    }),
+    prisma.productionLine.findMany({
+      select: { id: true, dailyCapacity: true },
+    }),
+  ]);
+
+  // 이미 분할된 행(수동 포함)이 차지한 일별 부하 — CAPA에서 차감
+  const existingLoad = new Map<string, number>();
+  for (const e of weekly) {
+    for (const d of e.dailyEntries) {
+      const key = `${e.lineId}|${d.date.toISOString().slice(0, 10)}`;
+      existingLoad.set(key, (existingLoad.get(key) ?? 0) + d.qty);
+    }
+  }
 
   const drafts = generateDailyDraft(
     weekly.map((e) => ({
       id: e.id,
+      lineId: e.lineId,
       weekStart: e.weekStart,
       qty: e.qty,
       hasDaily: e.dailyEntries.length > 0,
-    }))
+      dueDate: e.orderLine?.dueDate ?? null,
+    })),
+    new Map(lines.map((l) => [l.id, l.dailyCapacity])),
+    existingLoad
   );
 
   if (drafts.length > 0) {

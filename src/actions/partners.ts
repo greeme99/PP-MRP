@@ -33,6 +33,26 @@ export async function createPartner(
   return { ok: true };
 }
 
+/** 거래처 삭제 — 수주/품목 공급사로 참조 중이면 거부 */
+export async function deletePartner(id: number): Promise<ActionResult> {
+  const partner = await prisma.partner.findUnique({
+    where: { id },
+    include: { _count: { select: { orders: true, suppliedItems: true } } },
+  });
+  if (!partner) return { ok: false, message: "거래처가 없습니다" };
+  if (partner._count.orders + partner._count.suppliedItems > 0) {
+    return {
+      ok: false,
+      message:
+        "수주 또는 품목 공급사로 사용 중이라 삭제할 수 없습니다. 대신 사용중지 처리하세요.",
+    };
+  }
+  await prisma.partner.delete({ where: { id } });
+  revalidatePath("/mdm/vendors");
+  revalidatePath("/mdm/customers");
+  return { ok: true };
+}
+
 export async function togglePartnerActive(id: number): Promise<ActionResult> {
   const partner = await prisma.partner.findUnique({ where: { id } });
   if (!partner) return { ok: false, message: "거래처가 없습니다" };

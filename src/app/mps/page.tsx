@@ -52,7 +52,7 @@ export default async function MpsPage({
   const weekKeys = weeks.map(toDateKey);
   const weekKeySet = new Set(weekKeys);
 
-  const [lines, entries, unplanned] = await Promise.all([
+  const [lines, entries, unplanned, results] = await Promise.all([
     prisma.productionLine.findMany({
       orderBy: { code: "asc" },
       where: { OR: [{ isActive: true }, { planEntries: { some: {} } }] },
@@ -71,6 +71,10 @@ export default async function MpsPage({
       },
       include: { order: true, item: true },
       orderBy: { dueDate: "asc" },
+    }),
+    prisma.productionResult.findMany({
+      where: { date: { gte: from, lt: addWeeks(from, weeksCount) } },
+      select: { date: true, lineId: true, qty: true },
     }),
   ]);
 
@@ -123,6 +127,13 @@ export default async function MpsPage({
   for (const e of entries) {
     const key = `${e.lineId}|${toDateKey(e.weekStart)}`;
     load.set(key, (load.get(key) ?? 0) + e.qty);
+  }
+
+  // 라인×주차 실적 합계 (범위 내)
+  const resultLoad = new Map<string, number>();
+  for (const r of results) {
+    const key = `${r.lineId}|${toDateKey(weekStartOf(r.date))}`;
+    resultLoad.set(key, (resultLoad.get(key) ?? 0) + r.qty);
   }
 
   const prevKey = toDateKey(addWeeks(from, -4));
@@ -288,6 +299,30 @@ export default async function MpsPage({
                             <>
                               {l.toLocaleString()}
                               <div className="text-[10px]">{pct}%</div>
+                            </>
+                          ) : (
+                            "·"
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="border-b"></td>
+                    <td className="border-b"></td>
+                  </tr>
+                  <tr className="bg-gray-50">
+                    <td className="px-2 py-1 border-b text-xs text-green-700 sticky left-0 bg-gray-50">
+                      실적 (달성률)
+                    </td>
+                    {weekKeys.map((wk) => {
+                      const r = resultLoad.get(`${line.id}|${wk}`) ?? 0;
+                      const l = load.get(`${line.id}|${wk}`) ?? 0;
+                      const pct = l > 0 ? Math.round((r / l) * 100) : null;
+                      return (
+                        <td key={wk} className={`border-b text-center text-xs px-1 py-1 ${r === 0 ? "text-gray-300" : "text-green-700"}`}>
+                          {r > 0 ? (
+                            <>
+                              {r.toLocaleString()}
+                              {pct !== null && <div className="text-[10px]">{pct}%</div>}
                             </>
                           ) : (
                             "·"

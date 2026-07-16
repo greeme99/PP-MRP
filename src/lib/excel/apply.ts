@@ -4,6 +4,7 @@ import { hasCycle } from "@/lib/bom";
 import type {
   BomRow,
   ImportError,
+  InventoryRow,
   ItemRow,
   OrderRow,
   PartnerRow,
@@ -232,4 +233,54 @@ export async function applyOrders(rows: OrderRow[]): Promise<SheetApplyResult> {
     }
   });
   return { sheet: "수주", imported: rows.length, errors: [] };
+}
+
+/** 재고 실사 이관: 실사 절대수량과 현재고의 차이를 ADJUST 트랜잭션으로 기록한다. */
+export async function applyInventory(
+  rows: InventoryRow[]
+): Promise<SheetApplyResult> {
+  const codes = [...new Set(rows.map((r) => r.itemCode))];
+  const items = await prisma.item.findMany({ where: { code: { in: codes } } });
+  const itemByCode = new Map(items.map((i) => [i.code, i.id]));
+
+  const errors: ImportError[] = rows
+    .filter((r) => !itemByCode.has(r.itemCode))
+    .map((r) => ({
+      sheet: "재고",
+      row: r.row,
+      column: "품목코드",
+      message: `등록되지 않은 품목코드입니다: ${r.itemCode}`,
+    }));
+  if (errors.length > 0) return { sheet: "재고", imported: 0, errors };
+
+  const today = new Date(
+    `${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`
+  );
+  const sums = await prisma.inventoryTx.groupBy({
+    by: ["itemId"],
+    where: { itemId: { in: items.map((i) => i.id) } },
+    _sum: { qty: true },
+  });
+  const currentByItem = new Map(sums.map((s) => [s.itemId, s._sum.qty ?? 0]));
+
+  let applied = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const r of rows) {
+      const itemId = itemByCode.get(r.itemCode)!;
+      const current = currentByItem.get(itemId) ?? 0;
+      const delta = r.actualQty - current;
+      if (delta === 0) continue;
+      await tx.inventoryTx.create({
+        data: {
+          itemId,
+          type: "ADJUST",
+          qty: delta,
+          date: r.date ?? today,
+          memo: `엑셀 실사 이관 (${current.toLocaleString()} → ${r.actualQty.toLocaleString()})`,
+        },
+      });
+      applied++;
+    }
+  });
+  return { sheet: "재고", imported: applied, errors: [] };
 }

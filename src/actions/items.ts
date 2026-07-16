@@ -63,6 +63,79 @@ export async function updateItem(
   return { ok: true };
 }
 
+const masterSchema = z.object({
+  moq: z.coerce.number().int().positive().optional(),
+  leadTimeDays: z.coerce.number().int().min(0).optional(),
+  roundingValue: z.coerce.number().int().positive().optional(),
+  orderPattern: z.enum(["PO", "DO", "JIT", "KANBAN"]).optional(),
+  defaultVendorId: z.coerce.number().int().positive().optional(),
+  defaultLineId: z.coerce.number().int().positive().optional(),
+});
+
+/** Item Master 발주속성 갱신 (빈 값 = 해제) */
+export async function updateItemMaster(
+  id: number,
+  formData: FormData
+): Promise<ActionResult> {
+  const raw = (k: string) => {
+    const v = formData.get(k);
+    return v === null || v === "" ? undefined : v;
+  };
+  const parsed = masterSchema.safeParse({
+    moq: raw("moq"),
+    leadTimeDays: raw("leadTimeDays"),
+    roundingValue: raw("roundingValue"),
+    orderPattern: raw("orderPattern"),
+    defaultVendorId: raw("defaultVendorId"),
+    defaultLineId: raw("defaultLineId"),
+  });
+  if (!parsed.success) {
+    return { ok: false, message: parsed.error.issues[0].message };
+  }
+  await prisma.item.update({
+    where: { id },
+    data: {
+      moq: parsed.data.moq ?? null,
+      leadTimeDays: parsed.data.leadTimeDays ?? null,
+      roundingValue: parsed.data.roundingValue ?? null,
+      orderPattern: parsed.data.orderPattern ?? null,
+      defaultVendorId: parsed.data.defaultVendorId ?? null,
+      defaultLineId: parsed.data.defaultLineId ?? null,
+    },
+  });
+  revalidatePath("/mdm/items");
+  return { ok: true };
+}
+
+/** 품목 삭제 — 수주/계획/실적/재고에서 참조 중이면 거부 */
+export async function deleteItem(id: number): Promise<ActionResult> {
+  const item = await prisma.item.findUnique({
+    where: { id },
+    include: {
+      _count: {
+        select: {
+          orderLines: true,
+          planEntries: true,
+          results: true,
+          inventoryTxs: true,
+        },
+      },
+    },
+  });
+  if (!item) return { ok: false, message: "품목이 없습니다" };
+  const c = item._count;
+  if (c.orderLines + c.planEntries + c.results + c.inventoryTxs > 0) {
+    return {
+      ok: false,
+      message:
+        "수주/계획/실적/재고에서 사용 중이라 삭제할 수 없습니다. 대신 사용중지 처리하세요.",
+    };
+  }
+  await prisma.item.delete({ where: { id } }); // BOM 행은 cascade 삭제
+  revalidatePath("/mdm/items");
+  return { ok: true };
+}
+
 export async function toggleItemActive(id: number): Promise<ActionResult> {
   const item = await prisma.item.findUnique({ where: { id } });
   if (!item) return { ok: false, message: "품목이 없습니다" };

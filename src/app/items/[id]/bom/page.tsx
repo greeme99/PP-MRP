@@ -49,8 +49,8 @@ export default async function BomPage({
         <Badge color="blue">{ITEM_TYPE_LABEL[item.type]}</Badge>
       </PageTitle>
       <p className="text-sm mb-4">
-        <Link href="/items" className="text-blue-600 hover:underline">
-          ← 품목 목록으로
+        <Link href="/mdm/items" className="text-blue-600 hover:underline">
+          ← Item Master로
         </Link>
       </p>
 
